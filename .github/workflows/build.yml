@@ -1,0 +1,55 @@
+name: VMP Oboe Cloud Build (Modern)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Extract Zipped Project
+      run: |
+        unzip -o Project.zip -d .
+        echo "=== Listing Root Directory ==="
+        ls -la
+
+    - name: Setup Java JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'gradle' # Automatically caches files to speed up next builds
+
+    - name: Grant Execute Permission to Gradle Wrapper
+      run: |
+        if [ -f "gradlew" ]; then
+          chmod +x gradlew
+        elif [ -f "Project/gradlew" ]; then
+          cd Project && chmod +x gradlew
+        else
+          echo "Warning: gradlew wrapper not found globally, checking inside folders."
+        fi
+
+    - name: Compile VMP Engine (Modern Run)
+      run: |
+        # If unzip created a nested subfolder, shift to that path before compiling
+        if [ -f "gradlew" ]; then
+          ./gradlew assembleDebug --stacktrace
+        else
+          cd $(find . -maxdepth 2 -name "gradlew" -exec dirname {} \;)
+          ./gradlew assembleDebug --stacktrace
+        fi
+
+    - name: Find and Upload Final APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: VMP-Oboe-Engine-APK
+        path: |
+          **/build/outputs/apk/debug/*.apk
+          
