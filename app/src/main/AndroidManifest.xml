@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.audio.sound.master">
+
+    <!-- 🔥 FIX: minSdk ko 26 kar diya gaya hai taake build.gradle aur NDK ke sath align ho jaye -->
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
+
+    <!-- 🔥 NAYI PERMISSIONS (OBOE HARDWARE ENGINE KO CRASH SE BACHANE KE LIYE) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Zaroori Permissions -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <application
+        android:allowBackup="true"
+        android:label="VMP-X Stealth Engine"
+        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"> 
+        
+        <activity android:name=".MainActivity"
+                  android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service 
+            android:name="com.audio.sound.master.PremiumAudioService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+            
+    </application>
+</manifest>
