@@ -23,6 +23,7 @@ import android.widget.Toast;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.lang.reflect.Method; // 🔥 NAYA: Reflection Library
 
 public class PremiumAudioService extends Service {
 
@@ -52,18 +53,43 @@ public class PremiumAudioService extends Service {
         }
     };
 
+    // 🔥 FIX: Java Reflection ke zariye compiler ko dhoka de kar hidden APIs call karna
     private AudioManager.AudioPlaybackCallback playbackCallback = new AudioManager.AudioPlaybackCallback() {
         @Override
         public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
             super.onPlaybackConfigChanged(configs);
-            // 🔥 FIX: Android 9+ (API 28) ke liye theek methods ka istemaal kiya gaya hai
-            if (configs != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            if (configs != null) {
                 for (AudioPlaybackConfiguration config : configs) {
-                    if (config.getPlayerState() == AudioPlaybackConfiguration.PLAYER_STATE_STARTED) {
-                        int sessionId = config.getSessionId();
-                        if (sessionId != 0 && sessionId != AudioManager.AUDIO_SESSION_ID_GENERATE) {
-                            attachStealthEqToSession(sessionId);
+                    try {
+                        boolean isPlaying = false;
+                        
+                        // 1. Stream ka status check karna (Bypasses Compiler Error)
+                        try {
+                            Method isActiveMethod = config.getClass().getDeclaredMethod("isActive");
+                            isPlaying = (boolean) isActiveMethod.invoke(config);
+                        } catch (Exception e) {
+                            Method getStateMethod = config.getClass().getDeclaredMethod("getPlayerState");
+                            int state = (int) getStateMethod.invoke(config);
+                            isPlaying = (state == 2); // 2 means PLAYER_STATE_STARTED
                         }
+
+                        // 2. BGMI/App ka hidden Session ID nikalna
+                        if (isPlaying) {
+                            int sessionId = 0;
+                            try {
+                                Method getSessionMethod = config.getClass().getDeclaredMethod("getSessionId");
+                                sessionId = (int) getSessionMethod.invoke(config);
+                            } catch (Exception e) {
+                                Method getAudioSessionMethod = config.getClass().getDeclaredMethod("getAudioSessionId");
+                                sessionId = (int) getAudioSessionMethod.invoke(config);
+                            }
+                            
+                            if (sessionId != 0 && sessionId != AudioManager.AUDIO_SESSION_ID_GENERATE) {
+                                attachStealthEqToSession(sessionId);
+                            }
+                        }
+                    } catch (Exception e) {
+                        // Khamoshi se ignore karein taake app crash na ho (Stealth Mode)
                     }
                 }
             }
@@ -270,5 +296,5 @@ public class PremiumAudioService extends Service {
         instance = null;
         super.onDestroy();
     }
-        }
-                
+                }
+            
