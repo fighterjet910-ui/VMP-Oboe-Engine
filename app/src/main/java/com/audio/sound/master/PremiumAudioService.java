@@ -12,6 +12,7 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
 import android.media.audiofx.Equalizer;
 import android.os.Build;
 import android.os.IBinder;
@@ -19,6 +20,9 @@ import android.provider.Settings;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
+
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class PremiumAudioService extends Service {
 
@@ -28,8 +32,10 @@ public class PremiumAudioService extends Service {
     private SharedPreferences memoryMatrix;
     private static final String CHANNEL_ID = "vmp_warp_speed_core";
     
-    private Equalizer globalEq;
     private AudioManager audioManager;
+    
+    // 🔥 NAYA: Dynamic Session Radar (BGMI ke hidden streams ko catch karne ke liye)
+    private ConcurrentHashMap<Integer, Equalizer> activeEqualizers = new ConcurrentHashMap<>();
 
     private native long initNativeEngine();
     private native void setNativeBandGain(long handle, int band, float gain);
@@ -44,6 +50,24 @@ public class PremiumAudioService extends Service {
             } else if ("STOP_VMP_ENGINE".equals(action)) {
                 if (uiWindow != null) uiWindow.hideUI();
                 stopSelf(); 
+            }
+        }
+    };
+
+    // 🔥 NAYA: Radar jo har naye audio stream ko scan karke EQ attach karega
+    private AudioManager.AudioPlaybackCallback playbackCallback = new AudioManager.AudioPlaybackCallback() {
+        @Override
+        public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
+            super.onPlaybackConfigChanged(configs);
+            if (configs != null) {
+                for (AudioPlaybackConfiguration config : configs) {
+                    if (config.isActive()) {
+                        int sessionId = config.getAudioSessionId();
+                        if (sessionId != 0 && sessionId != AudioManager.AUDIO_SESSION_ID_GENERATE) {
+                            attachStealthEqToSession(sessionId);
+                        }
+                    }
+                }
             }
         }
     };
@@ -75,14 +99,14 @@ public class PremiumAudioService extends Service {
             showToast("FATAL ERROR: " + t.getMessage());
         }
 
-        // 🔥 Android 9+ SandBox Bypass: Max Priority (10000) for Session 0
-        try {
-            // Audio settings modify karne se pehle zaroori hai
-            globalEq = new Equalizer(10000, 0); // 10000 Priority forces OS to listen to us
-            globalEq.setEnabled(true);
-            showToast("Stealth EQ Hooked to Hardware!");
-        } catch (Exception e) {
-            showToast("Stealth Hook Failed: Ensure MODIFY_AUDIO_SETTINGS is granted");
+        // 🔥 BGMI Catcher Radar Start
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioManager != null) {
+            audioManager.registerAudioPlaybackCallback(playbackCallback, new Handler(Looper.getMainLooper()));
+            // Ek baar shuru mein bhi check kar lete hain agar BGMI pehle se chal raha ho
+            playbackCallback.onPlaybackConfigChanged(audioManager.getActivePlaybackConfigurations());
+            
+            // Fallback Global Session 0 (Baaki poore phone ke liye)
+            attachStealthEqToSession(0);
         }
         
         try {
@@ -93,6 +117,25 @@ public class PremiumAudioService extends Service {
             }
         } catch (Throwable t) {
             showToast("UI Error: " + t.getMessage());
+        }
+    }
+
+    private void attachStealthEqToSession(int sessionId) {
+        if (!activeEqualizers.containsKey(sessionId)) {
+            try {
+                Equalizer eq = new Equalizer(10000, sessionId);
+                eq.setEnabled(true);
+                activeEqualizers.put(sessionId, eq);
+                
+                // Existing gains apply karna
+                if (VMP_ControllerView.currentBands != null) {
+                    for (int i = 0; i < 10; i++) {
+                        applyGainToEq(eq, i, VMP_ControllerView.currentBands[i]);
+                    }
+                }
+            } catch (Exception e) {
+                // Ignore silent blockages
+            }
         }
     }
 
@@ -151,19 +194,27 @@ public class PremiumAudioService extends Service {
             instance.setNativeBandGain(instance.nativeProcessorHandle, bandIndex, gainValue);
         }
         
-        // Android 9+ EQ Injector
-        if (instance != null && instance.globalEq != null && instance.globalEq.getEnabled()) {
+        // 🔥 NAYA: Har catch kiye gaye BGMI/System stream par apply karo
+        if (instance != null) {
+            for (Equalizer eq : instance.activeEqualizers.values()) {
+                applyGainToEq(eq, bandIndex, gainValue);
+            }
+        }
+    }
+
+    private static void applyGainToEq(Equalizer eq, int bandIndex, float gainValue) {
+        if (eq != null && eq.getEnabled()) {
             try {
-                short numBands = instance.globalEq.getNumberOfBands();
+                short numBands = eq.getNumberOfBands();
                 if (numBands > 0) {
                     short hardwareBand = (short) ((bandIndex * numBands) / 10);
                     short millibels = (short) (gainValue * 100);
                     
-                    short[] range = instance.globalEq.getBandLevelRange();
+                    short[] range = eq.getBandLevelRange();
                     if (millibels < range[0]) millibels = range[0];
                     if (millibels > range[1]) millibels = range[1];
                     
-                    instance.globalEq.setBandLevel(hardwareBand, millibels);
+                    eq.setBandLevel(hardwareBand, millibels);
                 }
             } catch (Exception e) {}
         }
@@ -202,16 +253,23 @@ public class PremiumAudioService extends Service {
             unregisterReceiver(actionReceiver);
         } catch (IllegalArgumentException e) {}
         
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioManager != null) {
+            audioManager.unregisterAudioPlaybackCallback(playbackCallback);
+        }
+        
         if (nativeProcessorHandle != 0) {
             releaseNativeEngine(nativeProcessorHandle);
             nativeProcessorHandle = 0;
         }
         
-        if (globalEq != null) {
-            globalEq.setEnabled(false);
-            globalEq.release();
-            globalEq = null;
+        // Saare active Equalizers clear karein
+        for (Equalizer eq : activeEqualizers.values()) {
+            if (eq != null) {
+                eq.setEnabled(false);
+                eq.release();
+            }
         }
+        activeEqualizers.clear();
         
         if (uiWindow != null) {
             uiWindow.hideUI();
@@ -221,4 +279,5 @@ public class PremiumAudioService extends Service {
         instance = null;
         super.onDestroy();
     }
-}
+                }
+            
