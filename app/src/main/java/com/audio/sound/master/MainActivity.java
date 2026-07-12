@@ -23,10 +23,24 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
+        // 🔥 FIX: Android 13+ ke liye Notification aur Audio permissions ek sath maangna
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            ArrayList<String> permissionsToRequest = new ArrayList<>();
+            
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 100);
+                permissionsToRequest.add(android.Manifest.permission.RECORD_AUDIO);
             }
+            
+            if (Build.VERSION.SDK_INT >= 33) { // Android 13+ (Tiramisu)
+                if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    permissionsToRequest.add(android.Manifest.permission.POST_NOTIFICATIONS);
+                }
+            }
+            
+            if (!permissionsToRequest.isEmpty()) {
+                requestPermissions(permissionsToRequest.toArray(new String[0]), 100);
+            }
+            
             if (!Settings.canDrawOverlays(this)) {
                 startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
             }
@@ -45,7 +59,6 @@ public class MainActivity extends Activity {
         startBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // 🔥 CRASH SHIELD: Ab app crash hone ke bajaye error batayegi
                 try {
                     Intent serviceIntent = new Intent(MainActivity.this, PremiumAudioService.class);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -73,7 +86,6 @@ public class MainActivity extends Activity {
                 String name = configInput.getText().toString();
                 if(!name.isEmpty()) {
                     try {
-                        // 🔥 FIX: currentSpatial variable hata diya gaya hai kyunki ab wo hardware par automatically chalta hai
                         PremiumAudioService.saveConfiguration(name, VMP_ControllerView.currentBands, 0);
                         
                         if(!configList.contains(name)) {
@@ -110,5 +122,5 @@ public class MainActivity extends Activity {
 
         setContentView(mainLayout);
     }
-            }
-          
+                }
+                    
