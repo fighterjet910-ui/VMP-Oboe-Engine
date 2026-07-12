@@ -33,8 +33,6 @@ public class PremiumAudioService extends Service {
     private static final String CHANNEL_ID = "vmp_warp_speed_core";
     
     private AudioManager audioManager;
-    
-    // 🔥 NAYA: Dynamic Session Radar (BGMI ke hidden streams ko catch karne ke liye)
     private ConcurrentHashMap<Integer, Equalizer> activeEqualizers = new ConcurrentHashMap<>();
 
     private native long initNativeEngine();
@@ -54,15 +52,15 @@ public class PremiumAudioService extends Service {
         }
     };
 
-    // 🔥 NAYA: Radar jo har naye audio stream ko scan karke EQ attach karega
     private AudioManager.AudioPlaybackCallback playbackCallback = new AudioManager.AudioPlaybackCallback() {
         @Override
         public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
             super.onPlaybackConfigChanged(configs);
-            if (configs != null) {
+            // 🔥 FIX: Android 9+ (API 28) ke liye theek methods ka istemaal kiya gaya hai
+            if (configs != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 for (AudioPlaybackConfiguration config : configs) {
-                    if (config.isActive()) {
-                        int sessionId = config.getAudioSessionId();
+                    if (config.getPlayerState() == AudioPlaybackConfiguration.PLAYER_STATE_STARTED) {
+                        int sessionId = config.getSessionId();
                         if (sessionId != 0 && sessionId != AudioManager.AUDIO_SESSION_ID_GENERATE) {
                             attachStealthEqToSession(sessionId);
                         }
@@ -99,13 +97,9 @@ public class PremiumAudioService extends Service {
             showToast("FATAL ERROR: " + t.getMessage());
         }
 
-        // 🔥 BGMI Catcher Radar Start
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioManager != null) {
             audioManager.registerAudioPlaybackCallback(playbackCallback, new Handler(Looper.getMainLooper()));
-            // Ek baar shuru mein bhi check kar lete hain agar BGMI pehle se chal raha ho
             playbackCallback.onPlaybackConfigChanged(audioManager.getActivePlaybackConfigurations());
-            
-            // Fallback Global Session 0 (Baaki poore phone ke liye)
             attachStealthEqToSession(0);
         }
         
@@ -127,7 +121,6 @@ public class PremiumAudioService extends Service {
                 eq.setEnabled(true);
                 activeEqualizers.put(sessionId, eq);
                 
-                // Existing gains apply karna
                 if (VMP_ControllerView.currentBands != null) {
                     for (int i = 0; i < 10; i++) {
                         applyGainToEq(eq, i, VMP_ControllerView.currentBands[i]);
@@ -194,7 +187,6 @@ public class PremiumAudioService extends Service {
             instance.setNativeBandGain(instance.nativeProcessorHandle, bandIndex, gainValue);
         }
         
-        // 🔥 NAYA: Har catch kiye gaye BGMI/System stream par apply karo
         if (instance != null) {
             for (Equalizer eq : instance.activeEqualizers.values()) {
                 applyGainToEq(eq, bandIndex, gainValue);
@@ -262,7 +254,6 @@ public class PremiumAudioService extends Service {
             nativeProcessorHandle = 0;
         }
         
-        // Saare active Equalizers clear karein
         for (Equalizer eq : activeEqualizers.values()) {
             if (eq != null) {
                 eq.setEnabled(false);
@@ -279,5 +270,5 @@ public class PremiumAudioService extends Service {
         instance = null;
         super.onDestroy();
     }
-                }
-            
+        }
+                
