@@ -2,14 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.audio.sound.master">
 
-    <!-- 🔥 FIX: minSdk ko 26 kar diya gaya hai taake build.gradle aur NDK ke sath align ho jaye -->
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
 
-    <!-- 🔥 NAYI PERMISSIONS (OBOE HARDWARE ENGINE KO CRASH SE BACHANE KE LIYE) -->
+    <!-- 🔥 NAYI PERMISSION: Android 13+ mein notification dikhane ke liye -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-
-    <!-- Zaroori Permissions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
