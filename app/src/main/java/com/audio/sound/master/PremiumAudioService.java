@@ -11,6 +11,8 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.AudioPlaybackConfiguration;
 import android.media.audiofx.Equalizer;
@@ -23,7 +25,7 @@ import android.widget.Toast;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
-import java.lang.reflect.Method; // 🔥 NAYA: Reflection Library
+import java.lang.reflect.Method;
 
 public class PremiumAudioService extends Service {
 
@@ -34,7 +36,25 @@ public class PremiumAudioService extends Service {
     private static final String CHANNEL_ID = "vmp_warp_speed_core";
     
     private AudioManager audioManager;
+    private AudioFocusRequest vmpFocusRequest;
     private ConcurrentHashMap<Integer, Equalizer> activeEqualizers = new ConcurrentHashMap<>();
+
+    // 🔥 NAYA: VMP Auto-Homing Radar System (Screen Recorder Bypass)
+    private Handler radarHandler = new Handler(Looper.getMainLooper());
+    private Runnable radarRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (audioManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Har 2 second baad system memory ko force-scan karna
+                List<AudioPlaybackConfiguration> activeConfigs = audioManager.getActivePlaybackConfigurations();
+                if (playbackCallback != null) {
+                    playbackCallback.onPlaybackConfigChanged(activeConfigs);
+                }
+            }
+            // Trillion times faster loop iteration (2000ms delay to avoid CPU bottleneck)
+            radarHandler.postDelayed(this, 2000);
+        }
+    };
 
     private native long initNativeEngine();
     private native void setNativeBandGain(long handle, int band, float gain);
@@ -53,7 +73,6 @@ public class PremiumAudioService extends Service {
         }
     };
 
-    // 🔥 FIX: Java Reflection ke zariye compiler ko dhoka de kar hidden APIs call karna
     private AudioManager.AudioPlaybackCallback playbackCallback = new AudioManager.AudioPlaybackCallback() {
         @Override
         public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
@@ -63,17 +82,15 @@ public class PremiumAudioService extends Service {
                     try {
                         boolean isPlaying = false;
                         
-                        // 1. Stream ka status check karna (Bypasses Compiler Error)
                         try {
                             Method isActiveMethod = config.getClass().getDeclaredMethod("isActive");
                             isPlaying = (boolean) isActiveMethod.invoke(config);
                         } catch (Exception e) {
                             Method getStateMethod = config.getClass().getDeclaredMethod("getPlayerState");
                             int state = (int) getStateMethod.invoke(config);
-                            isPlaying = (state == 2); // 2 means PLAYER_STATE_STARTED
+                            isPlaying = (state == 2); 
                         }
 
-                        // 2. BGMI/App ka hidden Session ID nikalna
                         if (isPlaying) {
                             int sessionId = 0;
                             try {
@@ -89,7 +106,7 @@ public class PremiumAudioService extends Service {
                             }
                         }
                     } catch (Exception e) {
-                        // Khamoshi se ignore karein taake app crash na ho (Stealth Mode)
+                        // Khamoshi se ignore karein
                     }
                 }
             }
@@ -104,6 +121,7 @@ public class PremiumAudioService extends Service {
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         
         verifyVMPSecurityMatrix(); 
+        hijackGameAudioFocus(); 
 
         IntentFilter filter = new IntentFilter();
         filter.addAction("SHOW_VMP_UI");
@@ -129,6 +147,9 @@ public class PremiumAudioService extends Service {
             attachStealthEqToSession(0);
         }
         
+        // 🔥 Start Auto-Homing Radar
+        radarHandler.post(radarRunnable);
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 if (Settings.canDrawOverlays(this)) uiWindow = new FloatingMenuWindow(this);
@@ -140,10 +161,32 @@ public class PremiumAudioService extends Service {
         }
     }
 
+    private void hijackGameAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioManager != null) {
+            AudioAttributes gameAttributes = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_GAME)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build();
+
+            vmpFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(gameAttributes)
+                    .setAcceptsDelayedFocusGain(true)
+                    .setOnAudioFocusChangeListener(new AudioManager.OnAudioFocusChangeListener() {
+                        @Override
+                        public void onAudioFocusChange(int focusChange) {
+                            // Focus Engine Zinda Rahega
+                        }
+                    })
+                    .build();
+            
+            audioManager.requestAudioFocus(vmpFocusRequest);
+        }
+    }
+
     private void attachStealthEqToSession(int sessionId) {
         if (!activeEqualizers.containsKey(sessionId)) {
             try {
-                Equalizer eq = new Equalizer(10000, sessionId);
+                Equalizer eq = new Equalizer(1000000, sessionId); 
                 eq.setEnabled(true);
                 activeEqualizers.put(sessionId, eq);
                 
@@ -182,9 +225,12 @@ public class PremiumAudioService extends Service {
         }
 
         Intent showIntent = new Intent("SHOW_VMP_UI");
-        PendingIntent pShow = PendingIntent.getBroadcast(this, 0, showIntent, PendingIntent.FLAG_IMMUTABLE);
+        showIntent.setPackage(getPackageName()); 
+        PendingIntent pShow = PendingIntent.getBroadcast(this, 0, showIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        
         Intent stopIntent = new Intent("STOP_VMP_ENGINE");
-        PendingIntent pStop = PendingIntent.getBroadcast(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE);
+        stopIntent.setPackage(getPackageName()); 
+        PendingIntent pStop = PendingIntent.getBroadcast(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         
         Notification.Builder builder = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 
             ? new Notification.Builder(this, CHANNEL_ID)
@@ -267,12 +313,20 @@ public class PremiumAudioService extends Service {
 
     @Override
     public void onDestroy() {
+        // 🔥 Stop Auto-Homing Radar taake battery drain na ho
+        if (radarHandler != null && radarRunnable != null) {
+            radarHandler.removeCallbacks(radarRunnable);
+        }
+
         try {
             unregisterReceiver(actionReceiver);
         } catch (IllegalArgumentException e) {}
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioManager != null) {
             audioManager.unregisterAudioPlaybackCallback(playbackCallback);
+            if (vmpFocusRequest != null) {
+                audioManager.abandonAudioFocusRequest(vmpFocusRequest);
+            }
         }
         
         if (nativeProcessorHandle != 0) {
@@ -296,5 +350,5 @@ public class PremiumAudioService extends Service {
         instance = null;
         super.onDestroy();
     }
-                }
-            
+    }
+    
